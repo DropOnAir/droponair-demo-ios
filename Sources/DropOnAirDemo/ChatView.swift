@@ -8,6 +8,8 @@ struct ChatView: View {
     @State private var tab: Tab = .dm
     @State private var groupMessageText = ""
     @State private var newGroupName = ""
+    @State private var editTarget: ChatItem?
+    @State private var editDraft = ""
 
     enum Tab { case dm, groups }
 
@@ -65,6 +67,24 @@ struct ChatView: View {
         } message: {
             Text(vm.errorMessage ?? "")
         }
+        .alert("Edit message", isPresented: Binding(
+            get: { editTarget != nil },
+            set: { if !$0 { editTarget = nil } }
+        )) {
+            TextField("New text", text: $editDraft)
+            Button("Cancel", role: .cancel) { editTarget = nil }
+            Button("Save") {
+                if let target = editTarget, let to = target.toUserId {
+                    let next = editDraft.trimmingCharacters(in: .whitespaces)
+                    if !next.isEmpty && next != target.text {
+                        vm.edit(messageId: target.id, to: to, newText: next)
+                    }
+                }
+                editTarget = nil
+            }
+        } message: {
+            Text("Update the message text. Recipients see the new content; the relay never sees plaintext.")
+        }
     }
 
     // ── DM tab ───────────────────────────────────────────────────────────────
@@ -77,6 +97,20 @@ struct ChatView: View {
                         ForEach(vm.messages) { item in
                             MessageBubble(item: item)
                                 .id(item.id)
+                                .contextMenu {
+                                    if item.isSelf && !item.deleted, let to = item.toUserId {
+                                        Button {
+                                            editTarget = item
+                                            editDraft = item.text
+                                        } label: { Label("Edit", systemImage: "pencil") }
+                                        Button(role: .destructive) {
+                                            vm.delete(messageId: item.id, to: to, scope: "FOR_EVERYONE")
+                                        } label: { Label("Delete for everyone", systemImage: "trash") }
+                                        Button {
+                                            vm.delete(messageId: item.id, to: to, scope: "FOR_ME")
+                                        } label: { Label("Delete for me", systemImage: "trash.slash") }
+                                    }
+                                }
                         }
                     }
                     .padding()
@@ -236,17 +270,30 @@ private struct MessageBubble: View {
                         .foregroundColor(.secondary)
                 }
                 Text(item.text)
+                    .italic(item.deleted)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(item.isSelf ? Color.blue : Color.gray.opacity(0.2))
-                    .foregroundColor(item.isSelf ? .white : .primary)
+                    .background(bubbleBackground)
+                    .foregroundColor(item.deleted ? .secondary : (item.isSelf ? .white : .primary))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                Text(formattedTime(item.timestamp))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Text(formattedTime(item.timestamp))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    if item.edited && !item.deleted {
+                        Text("· edited")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             if !item.isSelf { Spacer() }
         }
+    }
+
+    private var bubbleBackground: Color {
+        if item.deleted { return Color.gray.opacity(0.15) }
+        return item.isSelf ? Color.blue : Color.gray.opacity(0.2)
     }
 
     private func formattedTime(_ ms: Int64) -> String {

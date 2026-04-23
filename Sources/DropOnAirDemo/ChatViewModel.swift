@@ -4,14 +4,18 @@ import DropOnAirSDK
 struct ChatItem: Identifiable {
     let id: String
     let fromUserId: String
-    let text: String
+    var text: String
     let timestamp: Int64
     let isSelf: Bool
     let groupId: String?
+    let toUserId: String?
+    var edited: Bool
+    var deleted: Bool
 
-    init(id: String, fromUserId: String, text: String, timestamp: Int64, isSelf: Bool, groupId: String? = nil) {
+    init(id: String, fromUserId: String, text: String, timestamp: Int64, isSelf: Bool, groupId: String? = nil, toUserId: String? = nil, edited: Bool = false, deleted: Bool = false) {
         self.id = id; self.fromUserId = fromUserId; self.text = text
         self.timestamp = timestamp; self.isSelf = isSelf; self.groupId = groupId
+        self.toUserId = toUserId; self.edited = edited; self.deleted = deleted
     }
 }
 
@@ -63,16 +67,49 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
         let myId = auth.userId ?? ""
         Task {
             do {
-                _ = try await client?.sendMessage(to: toUserId, text: text)
+                let messageId = try await client?.sendMessage(to: toUserId, text: text) ?? UUID().uuidString
                 messages.append(ChatItem(
-                    id:         UUID().uuidString,
+                    id:         messageId,
                     fromUserId: myId,
                     text:       text,
                     timestamp:  Int64(Date().timeIntervalSince1970 * 1000),
-                    isSelf:     true
+                    isSelf:     true,
+                    toUserId:   toUserId
                 ))
             } catch {
                 errorMessage = "Send failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Edit a previously sent direct message. Sender device only.
+    func edit(messageId: String, to toUserId: String, newText: String) {
+        Task {
+            do {
+                _ = try await client?.editMessage(originalMessageId: messageId, to: toUserId, newText: newText)
+                if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+                    messages[idx].text = newText
+                    messages[idx].edited = true
+                    messages[idx].deleted = false
+                }
+            } catch {
+                errorMessage = "Edit failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Delete a previously sent direct message. Sender device only. scope = FOR_EVERYONE or FOR_ME.
+    func delete(messageId: String, to toUserId: String, scope: String = "FOR_EVERYONE") {
+        Task {
+            do {
+                _ = try await client?.deleteMessage(originalMessageId: messageId, to: toUserId, scope: scope)
+                if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+                    messages[idx].text = "(message deleted)"
+                    messages[idx].deleted = true
+                    messages[idx].edited = false
+                }
+            } catch {
+                errorMessage = "Delete failed: \(error.localizedDescription)"
             }
         }
     }
@@ -104,6 +141,22 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
             timestamp:  message.timestamp,
             isSelf:     false
         ))
+    }
+
+    func dropOnAir(_ client: DropOnAirClient, didReceiveMessageEdit edit: DOAMessageEdit) {
+        if let idx = messages.firstIndex(where: { $0.id == edit.originalMessageId }) {
+            messages[idx].text = edit.text
+            messages[idx].edited = true
+            messages[idx].deleted = false
+        }
+    }
+
+    func dropOnAir(_ client: DropOnAirClient, didReceiveMessageDelete delete: DOAMessageDelete) {
+        if let idx = messages.firstIndex(where: { $0.id == delete.originalMessageId }) {
+            messages[idx].text = "(message deleted)"
+            messages[idx].deleted = true
+            messages[idx].edited = false
+        }
     }
 
     func dropOnAir(_ client: DropOnAirClient, didFailWithError error: Error) {
