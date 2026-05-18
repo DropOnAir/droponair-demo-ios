@@ -1,4 +1,8 @@
 import SwiftUI
+import DropOnAirSDK
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
 
 struct ChatView: View {
     @ObservedObject var vm: ChatViewModel
@@ -10,6 +14,11 @@ struct ChatView: View {
     @State private var newGroupName = ""
     @State private var editTarget: ChatItem?
     @State private var editDraft = ""
+    @State private var pendingAttachments: [DOAAttachment] = []
+    @State private var uploadingAttachment = false
+    #if canImport(PhotosUI)
+    @State private var selectedPhoto: PhotosPickerItem?
+    #endif
 
     enum Tab { case dm, groups }
 
@@ -95,7 +104,17 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(vm.messages) { item in
-                            MessageBubble(item: item)
+                            MessageBubble(item: item, onTapAttachment: { att in
+                                Task {
+                                    do {
+                                        _ = try await vm.downloadAttachment(att)
+                                        // The demo just verifies decryption succeeds;
+                                        // a real app would persist + display the bytes.
+                                    } catch {
+                                        print("Download failed: \(error)")
+                                    }
+                                }
+                            })
                                 .id(item.id)
                                 .contextMenu {
                                     if item.isSelf && !item.deleted, let to = item.toUserId {
@@ -133,16 +152,44 @@ struct ChatView: View {
                     #endif
                 TextField("Message…", text: $messageText)
                     .textFieldStyle(.roundedBorder)
+                #if canImport(PhotosUI)
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: uploadingAttachment ? "arrow.up.circle" : "paperclip")
+                }
+                .disabled(toUserId.trimmingCharacters(in: .whitespaces).isEmpty || uploadingAttachment)
+                .onChange(of: selectedPhoto) { newItem in
+                    guard let item = newItem else { return }
+                    let to = toUserId.trimmingCharacters(in: .whitespaces)
+                    guard !to.isEmpty else { return }
+                    Task {
+                        uploadingAttachment = true
+                        defer { uploadingAttachment = false }
+                        do {
+                            if let data = try await item.loadTransferable(type: Data.self) {
+                                let ref = try await vm.prepareAttachment(data, to: to, mimeType: "image/jpeg")
+                                pendingAttachments.append(ref)
+                            }
+                        } catch {
+                            // surface in status; keep simple for the demo
+                            print("Attachment upload failed: \(error)")
+                        }
+                        selectedPhoto = nil
+                    }
+                }
+                #endif
                 Button {
                     let text = messageText.trimmingCharacters(in: .whitespaces)
                     let to   = toUserId.trimmingCharacters(in: .whitespaces)
-                    guard !text.isEmpty, !to.isEmpty else { return }
-                    vm.send(to: to, text: text)
+                    guard !to.isEmpty else { return }
+                    if text.isEmpty && pendingAttachments.isEmpty { return }
+                    let toSend = pendingAttachments
+                    pendingAttachments = []
+                    vm.send(to: to, text: text, attachments: toSend)
                     messageText = ""
                 } label: {
                     Image(systemName: "paperplane.fill")
                 }
-                .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty && pendingAttachments.isEmpty)
 
                 Button {
                     if vm.activeCallId != nil {
@@ -259,6 +306,7 @@ struct ChatView: View {
 
 private struct MessageBubble: View {
     let item: ChatItem
+    var onTapAttachment: ((DOAAttachment) -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -269,13 +317,31 @@ private struct MessageBubble: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                Text(item.text)
-                    .italic(item.deleted)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(bubbleBackground)
-                    .foregroundColor(item.deleted ? .secondary : (item.isSelf ? .white : .primary))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                if !item.text.isEmpty {
+                    Text(item.text)
+                        .italic(item.deleted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(bubbleBackground)
+                        .foregroundColor(item.deleted ? .secondary : (item.isSelf ? .white : .primary))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                ForEach(item.attachments, id: \.attachmentID) { att in
+                    Button {
+                        onTapAttachment?(att)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperclip")
+                            Text("\(att.mimeType.isEmpty ? "file" : att.mimeType) · \(att.sizeBytes / 1024) KB")
+                                .font(.caption2)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
                 HStack(spacing: 4) {
                     Text(formattedTime(item.timestamp))
                         .font(.caption2)

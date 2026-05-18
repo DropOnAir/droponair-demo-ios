@@ -11,11 +11,13 @@ struct ChatItem: Identifiable {
     let toUserId: String?
     var edited: Bool
     var deleted: Bool
+    var attachments: [DOAAttachment]
 
-    init(id: String, fromUserId: String, text: String, timestamp: Int64, isSelf: Bool, groupId: String? = nil, toUserId: String? = nil, edited: Bool = false, deleted: Bool = false) {
+    init(id: String, fromUserId: String, text: String, timestamp: Int64, isSelf: Bool, groupId: String? = nil, toUserId: String? = nil, edited: Bool = false, deleted: Bool = false, attachments: [DOAAttachment] = []) {
         self.id = id; self.fromUserId = fromUserId; self.text = text
         self.timestamp = timestamp; self.isSelf = isSelf; self.groupId = groupId
         self.toUserId = toUserId; self.edited = edited; self.deleted = deleted
+        self.attachments = attachments
     }
 }
 
@@ -62,24 +64,43 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
         }
     }
 
-    func send(to toUserId: String, text: String) {
-        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    func send(to toUserId: String, text: String, attachments: [DOAAttachment] = []) {
+        if text.trimmingCharacters(in: .whitespaces).isEmpty && attachments.isEmpty { return }
         let myId = auth.userId ?? ""
         Task {
             do {
-                let messageId = try await client?.sendMessage(to: toUserId, text: text) ?? UUID().uuidString
+                let messageId = try await client?.sendMessage(to: toUserId, text: text, attachments: attachments) ?? UUID().uuidString
                 messages.append(ChatItem(
                     id:         messageId,
                     fromUserId: myId,
                     text:       text,
                     timestamp:  Int64(Date().timeIntervalSince1970 * 1000),
                     isSelf:     true,
-                    toUserId:   toUserId
+                    toUserId:   toUserId,
+                    attachments: attachments
                 ))
             } catch {
                 errorMessage = "Send failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Encrypt + upload an attachment via the SDK; returns the AttachmentRef to
+    /// pass into `send(to:text:attachments:)`.
+    func prepareAttachment(_ bytes: Data, to toUserId: String, mimeType: String) async throws -> DOAAttachment {
+        guard let client = client else { throw NSError(domain: "DropOnAir", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not connected"]) }
+        return try await client.prepareAttachmentAndUpload(bytes, options: DOAPrepareAttachmentOptions(
+            toUserID: toUserId,
+            encryptionType: .e2ee,
+            mimeType: mimeType
+        ))
+    }
+
+    /// Download + decrypt an attachment.
+    func downloadAttachment(_ ref: DOAAttachment) async throws -> Data {
+        guard let client = client else { throw NSError(domain: "DropOnAir", code: -1, userInfo: [NSLocalizedDescriptionKey: "Not connected"]) }
+        let dl = try await client.downloadAttachment(ref)
+        return dl.bytes
     }
 
     /// Edit a previously sent direct message. Sender device only.
@@ -139,7 +160,8 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
             fromUserId: message.fromUserId,
             text:       message.text,
             timestamp:  message.timestamp,
-            isSelf:     false
+            isSelf:     false,
+            attachments: message.attachments
         ))
     }
 
