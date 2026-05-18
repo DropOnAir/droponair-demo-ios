@@ -30,6 +30,8 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
 
     // Call state
     @Published var activeCallId: String?
+    @Published var amScreenSharing: Bool = false
+    @Published var peerScreenSharing: Bool = false
     @Published var incomingCallFrom: String?
     @Published var showIncomingCall = false
 
@@ -232,9 +234,31 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
             do {
                 try await client?.endCall(callId: callId)
                 activeCallId = nil
+                amScreenSharing = false
+                peerScreenSharing = false
                 statusText = "Connected"
             } catch {
                 errorMessage = "End failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Toggle the local screen-share signal for the active 1:1 call.
+    ///
+    /// This demo only exercises the SDK signaling surface. A real app would
+    /// also start a ReplayKit broadcast extension and add the resulting
+    /// RTCVideoTrack to the existing peer connection.
+    func toggleScreenShare() {
+        guard let callId = activeCallId, let client = client else { return }
+        Task {
+            if amScreenSharing {
+                await client.stopScreenShare(callId: callId)
+                amScreenSharing = false
+                statusText = "📞 Call active"
+            } else {
+                await client.startScreenShare(callId: callId)
+                amScreenSharing = true
+                statusText = "🖥 Sharing screen (capture handled by app)"
             }
         }
     }
@@ -258,6 +282,10 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
             case "CALL_DENIED_LIMIT_REACHED":
                 activeCallId = nil
                 statusText = "⚠ Call limit reached"
+            case "CALL_SCREEN_SHARE_STARTED":
+                peerScreenSharing = true
+            case "CALL_SCREEN_SHARE_STOPPED":
+                peerScreenSharing = false
             default:
                 break
             }

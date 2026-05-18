@@ -32,6 +32,16 @@ struct ChatView: View {
                 Text(vm.statusText)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                if vm.peerScreenSharing {
+                    Text("🖥 peer sharing")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                }
+                if vm.amScreenSharing {
+                    Text("🖥 you sharing")
+                        .font(.caption2)
+                        .foregroundColor(.green)
+                }
                 Spacer()
                 Text("Me: \(auth.userId ?? "")")
                     .font(.caption)
@@ -191,6 +201,14 @@ struct ChatView: View {
                 }
                 .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty && pendingAttachments.isEmpty)
 
+                if vm.activeCallId != nil {
+                    Button {
+                        vm.toggleScreenShare()
+                    } label: {
+                        Image(systemName: vm.amScreenSharing ? "rectangle.on.rectangle.fill" : "rectangle.on.rectangle")
+                            .foregroundColor(vm.amScreenSharing ? .orange : .secondary)
+                    }
+                }
                 Button {
                     if vm.activeCallId != nil {
                         vm.endCall()
