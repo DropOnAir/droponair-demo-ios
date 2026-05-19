@@ -60,6 +60,16 @@ final class ChatViewModel: ObservableObject, DropOnAirDelegate {
 
         do {
             try await sdk.connect(userId: auth.userId ?? "")
+            // Demonstrate APNs push token registration once the SDK is connected.
+            // In a real app you'd call this from AppDelegate's
+            // application(_:didRegisterForRemoteNotificationsWithDeviceToken:)
+            // and PKPushRegistry's pushRegistry(_:didUpdate:for:). The demo
+            // surfaces the call here without a real device token because the
+            // SwiftUI app skeleton in this repo doesn't carry a UIApplication
+            // delegate.
+            // Example wiring:
+            //   try await sdk.registerPushToken(platform: "APNS", token: hex)
+            //   try await sdk.registerPushToken(platform: "APNS", token: hex, voipToken: voipHex)
         } catch {
             errorMessage = error.localizedDescription
             statusText   = "Error: \(error.localizedDescription)"
