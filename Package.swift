@@ -9,7 +9,7 @@ let package = Package(
     platforms: [.iOS(.v16), .macOS(.v13)],
     dependencies: [
         // DropOnAir SDK. Latest release: https://github.com/DropOnAir/droponair-sdk-ios-binary/releases
-        .package(url: "https://github.com/DropOnAir/droponair-sdk-ios-binary.git", from: "0.22.0"),
+        .package(url: "https://github.com/DropOnAir/droponair-sdk-ios-binary.git", from: "0.23.2"),
     ],
     targets: [
         .executableTarget(
